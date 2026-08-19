@@ -4,20 +4,23 @@ import streamlit as st
 
 from src.config import Settings
 from src.database import Database
-from src.llm import LLMConfigurationError, LLMResponseError, OpenAIQueryGenerator
+from src.logging_config import configure_logging, get_logger
+from src.llm import DemoQueryGenerator, LLMConfigurationError, LLMResponseError, OpenAIQueryGenerator
 from src.service import QueryService
 from src.sql_guard import SQLValidationError
 
 
 st.set_page_config(page_title="InsightSQL", page_icon="▦", layout="wide", initial_sidebar_state="expanded")
 
+configure_logging()
+logger = get_logger()
 _SETTINGS = Settings.from_env()
-_DATABASE = Database(_SETTINGS.database_path)
+_DATABASE = Database(_SETTINGS.database_path, timeout_seconds=_SETTINGS.query_timeout_seconds)
 _DATABASE.initialize()
 
 
 def _service() -> QueryService:
-    generator = OpenAIQueryGenerator(_SETTINGS.openai_api_key, _SETTINGS.openai_model)
+    generator = OpenAIQueryGenerator(_SETTINGS.openai_api_key, _SETTINGS.openai_model) if _SETTINGS.openai_api_key else DemoQueryGenerator()
     return QueryService(_DATABASE, generator, _SETTINGS.max_rows)
 
 
@@ -36,7 +39,26 @@ st.markdown("""
     .metric { background: white; border: 1px solid var(--line); padding: 1rem; border-radius: 8px; }
     .metric strong { display: block; font-family: 'Space Grotesk'; font-size: 1.5rem; }
     .stButton > button { border-radius: 6px; border: 1px solid var(--ink); background: var(--lime); color: var(--ink); font-weight: 700; }
-    .stTextArea textarea { border: 1px solid #a9b9ae; border-radius: 6px; background: white; font-size: 1rem; }
+    [data-testid="stTextArea"] textarea,
+    .stTextArea textarea {
+        border: 1px solid #a9b9ae;
+        border-radius: 6px;
+        background: #ffffff !important;
+        color: #15251f !important;
+        caret-color: #15251f !important;
+        font-size: 1rem;
+        -webkit-text-fill-color: #15251f !important;
+    }
+    [data-testid="stTextArea"] textarea::placeholder,
+    .stTextArea textarea::placeholder {
+        color: #69776f !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stTextArea"] textarea::selection,
+    .stTextArea textarea::selection {
+        background: #b9f5d0;
+        color: #15251f;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -49,6 +71,10 @@ with st.sidebar:
     st.markdown("**Connected data**")
     st.code(str(_SETTINGS.database_path), language="text")
     st.caption(f"Maximum rows per answer: {_SETTINGS.max_rows}")
+    if _SETTINGS.openai_api_key:
+        st.success(f"GPT connected · {_SETTINGS.openai_model}")
+    else:
+        st.warning("Demo mode · configure OPENAI_API_KEY for free-form questions")
     st.divider()
     st.markdown("**Try asking**")
     for example in ("How many employees are in each department?", "Which projects are currently active?", "Show average salary by department."):
@@ -69,21 +95,25 @@ with left:
                 with st.spinner("Understanding the question and checking the query..."):
                     response = _service().ask(question.strip())
                 st.session_state["last_response"] = response
+                logger.info("query_completed rows=%s duration_ms=%.0f", response.result.row_count, response.result.duration_ms)
                 st.success(f"Answer ready in {response.result.duration_ms:.0f} ms")
             except (LLMConfigurationError, LLMResponseError) as exc:
+                logger.warning("query_generation_failed error_type=%s", type(exc).__name__)
                 _DATABASE.add_history(question.strip(), None, "ERROR", str(exc))
                 st.error(str(exc))
             except SQLValidationError:
+                logger.warning("query_blocked reason=sql_validation")
                 _DATABASE.add_history(question.strip(), None, "BLOCKED", "The generated SQL did not pass the read-only policy.")
                 st.error("The generated query did not pass the read-only safety policy.")
             except Exception:
+                logger.exception("query_failed")
                 _DATABASE.add_history(question.strip(), None, "ERROR", "Unexpected application error")
                 st.error("Something went wrong while running the question. Check the application logs and try again.")
 
     response = st.session_state.get("last_response")
     if response:
         st.markdown("### Answer")
-        st.dataframe(response.result.rows, column_config={column: column for column in response.result.columns}, use_container_width=True, hide_index=True)
+        st.dataframe(response.result.rows, use_container_width=True, hide_index=True)
         if response.result.truncated:
             st.caption(f"Showing the first {_SETTINGS.max_rows} rows. Refine the question for a smaller result.")
         st.caption(f"{response.result.row_count} rows · {response.result.duration_ms:.0f} ms")

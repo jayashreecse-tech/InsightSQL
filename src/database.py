@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .models import HistoryItem, QueryResult
+from .sql_guard import validate_connection
 
 
 _SCHEMA = """
@@ -98,13 +100,16 @@ _ASSIGNMENTS = [(1, 1, "Sponsor", 15), (2, 2, "Business Lead", 40), (3, 10, "Ana
 
 
 class Database:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, timeout_seconds: float = 5.0) -> None:
         self.path = path
+        self.timeout_seconds = timeout_seconds
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=5)
+    def connect(self, read_only: bool = False) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=self.timeout_seconds)
         connection.execute("PRAGMA foreign_keys = ON")
+        if read_only:
+            validate_connection(connection)
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -118,9 +123,12 @@ class Database:
                 connection.executemany("INSERT INTO employee_projects(employee_id, project_id, role_name, allocation_percent, assigned_date) VALUES (?, ?, ?, ?, '2026-01-01')", _ASSIGNMENTS)
 
     def execute_select(self, sql: str, max_rows: int) -> QueryResult:
+        from .sql_guard import validate_select
+
+        safe_sql = validate_select(sql)
         started = time.perf_counter()
-        with self.connect() as connection:
-            cursor = connection.execute(sql)
+        with self.connect(read_only=True) as connection:
+            cursor = connection.execute(safe_sql)
             rows = cursor.fetchmany(max_rows + 1)
             columns = [description[0] for description in cursor.description or []]
         truncated = len(rows) > max_rows

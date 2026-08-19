@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from src.database import Database
+from src.sql_guard import SQLValidationError
 
 
 def test_database_initializes_required_sample_data(tmp_path: Path) -> None:
@@ -25,3 +26,16 @@ def test_database_records_history(tmp_path: Path) -> None:
     history = database.history()
     assert history[0].question == "How many employees?"
     assert history[0].status == "SUCCESS"
+
+
+def test_database_blocks_write_operations_at_repository_boundary(tmp_path: Path) -> None:
+    database = Database(tmp_path / "test.db")
+    database.initialize()
+
+    for sql in ("DELETE FROM employees", "UPDATE employees SET salary = 0", "DROP TABLE employees"):
+        try:
+            database.execute_select(sql, 10)
+        except SQLValidationError:
+            pass
+        else:
+            raise AssertionError(f"Expected SQLValidationError for {sql}")

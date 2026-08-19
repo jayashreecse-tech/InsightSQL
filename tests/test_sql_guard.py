@@ -24,3 +24,7 @@ def test_allows_select_statements(sql: str) -> None:
 def test_rejects_non_select_or_multiple_statements(sql: str) -> None:
     with pytest.raises(SQLValidationError):
         validate_select(sql)
+
+
+def test_allows_select_with_newline_after_keyword() -> None:
+    assert validate_select("SELECT\nCOUNT(*) FROM employees").startswith("SELECT")

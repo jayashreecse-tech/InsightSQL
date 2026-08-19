@@ -44,3 +44,41 @@ class OpenAIQueryGenerator:
         if not sql:
             raise LLMResponseError("The model returned an empty query.")
         return GeneratedQuery(sql, explanation)
+
+
+class DemoQueryGenerator:
+    """Provide safe local examples when an OpenAI key is not configured."""
+
+    _QUERIES = {
+        "department": (
+            "SELECT d.department_name, COUNT(e.employee_id) AS employee_count "
+            "FROM departments d LEFT JOIN employees e ON e.department_id = d.department_id "
+            "GROUP BY d.department_id, d.department_name ORDER BY employee_count DESC",
+            "Employee counts grouped by department.",
+        ),
+        "project": (
+            "SELECT project_code, project_name, status, budget FROM projects ORDER BY project_id",
+            "Projects with their current status and budget.",
+        ),
+        "salary": (
+            "SELECT d.department_name, ROUND(AVG(e.salary), 2) AS average_salary "
+            "FROM employees e JOIN departments d ON d.department_id = e.department_id "
+            "GROUP BY d.department_id, d.department_name ORDER BY average_salary DESC",
+            "Average salary grouped by department.",
+        ),
+        "employee": (
+            "SELECT employee_number, first_name, last_name, job_title, employment_status "
+            "FROM employees ORDER BY employee_id",
+            "Employee directory from the approved workforce dataset.",
+        ),
+    }
+
+    def generate(self, question: str, schema: str) -> GeneratedQuery:
+        lowered = question.lower()
+        for keyword, (sql, explanation) in self._QUERIES.items():
+            if keyword in lowered:
+                return GeneratedQuery(sql, f"Demo mode: {explanation}")
+        raise LLMResponseError(
+            "OpenAI is not configured. Add OPENAI_API_KEY for natural-language SQL generation, "
+            "or try a department, employee, project, or salary question in demo mode."
+        )

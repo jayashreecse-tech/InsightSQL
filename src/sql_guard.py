@@ -13,6 +13,22 @@ _BLOCKED_TOKENS = re.compile(
     re.IGNORECASE,
 )
 _COMMENT = re.compile(r"(--[^\n]*|/\*.*?\*/)", re.DOTALL)
+_ALLOWED_TABLES = frozenset({"departments", "employees", "projects", "employee_projects"})
+
+
+def _authorizer(action: int, arg1: str | None, arg2: str | None, *_: str | None) -> int:
+    """Deny writes, pragmas, attached databases, and unapproved table access."""
+    read_actions = {sqlite3.SQLITE_READ, sqlite3.SQLITE_SELECT, sqlite3.SQLITE_FUNCTION}
+    if action in read_actions:
+        if action == sqlite3.SQLITE_READ and arg1 and arg1 not in _ALLOWED_TABLES:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    return sqlite3.SQLITE_DENY
+
+
+def validate_connection(connection: sqlite3.Connection) -> None:
+    """Install the read-only authorizer on a SQLite connection."""
+    connection.set_authorizer(_authorizer)
 
 
 def validate_select(sql: str) -> str:
@@ -22,17 +38,13 @@ def validate_select(sql: str) -> str:
 
     normalized = _COMMENT.sub(" ", sql).strip()
     without_trailing_semicolon = normalized.rstrip(";").strip()
-    if not without_trailing_semicolon.upper().startswith("SELECT ") and without_trailing_semicolon.upper() != "SELECT":
+    if not re.match(r"^SELECT\b", without_trailing_semicolon, re.IGNORECASE):
         raise SQLValidationError("Only SELECT statements are allowed.")
     if ";" in without_trailing_semicolon:
         raise SQLValidationError("Multiple SQL statements are not allowed.")
     if _BLOCKED_TOKENS.search(without_trailing_semicolon):
         raise SQLValidationError("The query contains a blocked SQL operation.")
 
-    try:
-        statement = sqlite3.complete_statement(without_trailing_semicolon + ";")
-    except sqlite3.Error as exc:
-        raise SQLValidationError("The query could not be parsed.") from exc
-    if not statement:
+    if not sqlite3.complete_statement(without_trailing_semicolon + ";"):
         raise SQLValidationError("The query is incomplete.")
     return without_trailing_semicolon
