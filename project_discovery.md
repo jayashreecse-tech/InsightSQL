@@ -279,7 +279,7 @@ Foreign keys use `ON DELETE RESTRICT` for departments, employees, and projects s
 
 ### 10.5 Create Table Scripts
 
-The following scripts target PostgreSQL 14 or later.
+The following scripts describe the logical schema. The executable SQLite versions are maintained in `schema.sql` and `seed.sql` at the repository root.
 
 ```sql
 CREATE TABLE departments (
