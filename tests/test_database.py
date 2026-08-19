@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from src.database import Database
+from src.errors import QueryExecutionError
 from src.sql_guard import SQLValidationError
 
 
@@ -39,3 +40,24 @@ def test_database_blocks_write_operations_at_repository_boundary(tmp_path: Path)
             pass
         else:
             raise AssertionError(f"Expected SQLValidationError for {sql}")
+
+
+def test_database_blocks_unapproved_tables_and_functions(tmp_path: Path) -> None:
+    database = Database(tmp_path / "test.db")
+    database.initialize()
+
+    for sql in ("SELECT * FROM query_history", 'SELECT load_extension("x")'):
+        try:
+            database.execute_select(sql, 10)
+        except QueryExecutionError:
+            pass
+        else:
+            raise AssertionError(f"Expected QueryExecutionError for {sql}")
+
+
+def test_database_preserves_result_column_names(tmp_path: Path) -> None:
+    database = Database(tmp_path / "test.db")
+    database.initialize()
+
+    result = database.execute_select("SELECT department_name AS department FROM departments", 10)
+    assert result.columns == ["department"]

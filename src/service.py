@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .contracts import QueryGenerator
 from .database import Database
-from .llm import OpenAIQueryGenerator
 from .models import GeneratedQuery, QueryResult
 from .sql_guard import validate_select
 
@@ -14,13 +14,22 @@ class QueryResponse:
     result: QueryResult
 
 
+class QuestionValidationError(ValueError):
+    """Raised when a user question is outside the supported input contract."""
+
+
 class QueryService:
-    def __init__(self, database: Database, generator: OpenAIQueryGenerator, max_rows: int) -> None:
+    def __init__(self, database: Database, generator: QueryGenerator, max_rows: int) -> None:
         self.database = database
         self.generator = generator
         self.max_rows = max_rows
 
     def ask(self, question: str) -> QueryResponse:
+        question = question.strip()
+        if not question:
+            raise QuestionValidationError("Enter a question to begin.")
+        if len(question) > 2000:
+            raise QuestionValidationError("Keep questions under 2,000 characters.")
         generated = self.generator.generate(question, self._schema_context())
         safe_sql = validate_select(generated.sql)
         result = self.database.execute_select(safe_sql, self.max_rows)

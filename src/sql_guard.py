@@ -14,6 +14,10 @@ _BLOCKED_TOKENS = re.compile(
 )
 _COMMENT = re.compile(r"(--[^\n]*|/\*.*?\*/)", re.DOTALL)
 _ALLOWED_TABLES = frozenset({"departments", "employees", "projects", "employee_projects"})
+_ALLOWED_FUNCTIONS = frozenset({
+    "avg", "cast", "coalesce", "count", "date", "group_concat", "max", "min",
+    "round", "strftime", "sum", "total", "upper", "lower",
+})
 
 
 def _authorizer(action: int, arg1: str | None, arg2: str | None, *_: str | None) -> int:
@@ -22,6 +26,10 @@ def _authorizer(action: int, arg1: str | None, arg2: str | None, *_: str | None)
     if action in read_actions:
         if action == sqlite3.SQLITE_READ and arg1 and arg1 not in _ALLOWED_TABLES:
             return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_FUNCTION:
+            function_name = (arg2 or arg1 or "").lower()
+            if function_name not in _ALLOWED_FUNCTIONS:
+                return sqlite3.SQLITE_DENY
         return sqlite3.SQLITE_OK
     return sqlite3.SQLITE_DENY
 

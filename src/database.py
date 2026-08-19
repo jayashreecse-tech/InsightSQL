@@ -8,6 +8,7 @@ from typing import Any
 
 from .models import HistoryItem, QueryResult
 from .sql_guard import validate_connection
+from .errors import QueryExecutionError
 
 
 _SCHEMA = """
@@ -128,9 +129,17 @@ class Database:
         safe_sql = validate_select(sql)
         started = time.perf_counter()
         with self.connect(read_only=True) as connection:
-            cursor = connection.execute(safe_sql)
-            rows = cursor.fetchmany(max_rows + 1)
-            columns = [description[0] for description in cursor.description or []]
+            deadline = started + self.timeout_seconds
+            connection.set_progress_handler(
+                lambda: 1 if time.perf_counter() >= deadline else 0,
+                1000,
+            )
+            try:
+                cursor = connection.execute(safe_sql)
+                rows = cursor.fetchmany(max_rows + 1)
+                columns = [description[0] for description in cursor.description or []]
+            except sqlite3.Error as exc:
+                raise QueryExecutionError("The approved query could not be completed.") from exc
         truncated = len(rows) > max_rows
         visible_rows = rows[:max_rows]
         return QueryResult(columns, [tuple(row) for row in visible_rows], len(visible_rows), truncated, (time.perf_counter() - started) * 1000)
@@ -138,6 +147,10 @@ class Database:
     def add_history(self, question: str, sql: str | None, status: str, error: str | None = None) -> None:
         with self.connect() as connection:
             connection.execute("INSERT INTO query_history(question, sql_text, status, error_message) VALUES (?, ?, ?, ?)", (question, sql, status, error))
+            connection.execute(
+                "DELETE FROM query_history WHERE history_id NOT IN "
+                "(SELECT history_id FROM query_history ORDER BY history_id DESC LIMIT 1000)"
+            )
 
     def history(self, limit: int = 20) -> list[HistoryItem]:
         with self.connect() as connection:

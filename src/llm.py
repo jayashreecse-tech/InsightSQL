@@ -14,14 +14,14 @@ class LLMResponseError(RuntimeError):
 
 
 class OpenAIQueryGenerator:
-    def __init__(self, api_key: str | None, model: str) -> None:
+    def __init__(self, api_key: str | None, model: str, timeout_seconds: float = 30.0) -> None:
         if not api_key:
             raise LLMConfigurationError("OPENAI_API_KEY is not configured.")
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise LLMConfigurationError("Install the openai package to enable SQL generation.") from exc
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=2)
         self.model = model
 
     def generate(self, question: str, schema: str) -> GeneratedQuery:
